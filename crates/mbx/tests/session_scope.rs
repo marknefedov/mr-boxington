@@ -827,3 +827,63 @@ rustc-wrapper = ""
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+/// A build script reports the temporary directory it was given and what the
+/// configured `temp_dir` held while it ran.
+fn temp_dir_fixture(root: &Path) {
+    project(root, "fn main() {}\n");
+    std::fs::write(
+        root.join("build.rs"),
+        r#"
+fn main() {
+    println!("cargo:rerun-if-env-changed=TEMP_REPORT");
+    let configured = std::env::var_os("MBX_TEMP_DIR").expect("MBX_TEMP_DIR reaches build scripts");
+    let sessions = std::fs::read_dir(&configured)
+        .unwrap()
+        .filter(|entry| {
+            entry.as_ref().unwrap().file_name().to_string_lossy().starts_with("mbx-session-")
+        })
+        .count();
+    let report = format!("{}\n{}\n", std::env::temp_dir().display(), sessions);
+    std::fs::write(std::env::var_os("TEMP_REPORT").unwrap(), report).unwrap();
+}
+"#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn the_session_lives_in_the_configured_temp_dir_and_commands_get_it_only_when_exported() {
+    for export in [false, true] {
+        // Kept short: the session's Unix socket lives beneath this directory.
+        let root = tempfile::tempdir().unwrap();
+        temp_dir_fixture(root.path());
+        let temp = root.path().join("t");
+        let report = root.path().join("report");
+        let output = mbx(root.path())
+            .env("MBX_TEMP_DIR", &temp)
+            .env("MBX_EXPORT_TEMP_DIR", if export { "1" } else { "0" })
+            .env("TEMP_REPORT", &report)
+            .args(["build", "--offline"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let report = std::fs::read_to_string(&report).unwrap();
+        let mut lines = report.lines();
+        let script_temp = Path::new(lines.next().unwrap());
+        assert_eq!(lines.next(), Some("1"), "one live session in {temp:?}");
+        if export {
+            assert_eq!(script_temp, temp);
+        } else {
+            assert_ne!(script_temp, temp);
+        }
+        // The session cleaned up after itself; the directory it was created in stays.
+        assert_eq!(std::fs::read_dir(&temp).unwrap().count(), 0);
+    }
+}

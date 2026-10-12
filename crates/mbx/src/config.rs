@@ -142,6 +142,26 @@ pub(crate) struct RawConfig {
     /// above it with `..` or normalize to an empty path.
     #[usage(env = "MBX_SHIMS_DIR", default_note = "`<cache_dir>/shims`")]
     shims_dir: Option<PathBuf>,
+    /// Directory for mbx's own temporary files, such as each build's session directory.
+    ///
+    /// Must be an absolute path, and is created when first needed. Point it at
+    /// the volume that holds `cache_dir`, such as a Windows Dev Drive, to keep
+    /// a build's scratch files there too. Only mbx uses it unless
+    /// `export_temp_dir` is enabled. On Unix, a long path can exceed the
+    /// length limit for the session's socket.
+    #[usage(
+        env = "MBX_TEMP_DIR",
+        default_note = "the platform temporary directory, from `TMPDIR` on Unix or `TMP` and `TEMP` on Windows"
+    )]
+    temp_dir: Option<PathBuf>,
+    /// Point the temporary directory of Cargo and the tools it runs at `temp_dir`.
+    ///
+    /// mbx then sets `TMPDIR` on Unix, or `TMP` and `TEMP` on Windows, for the
+    /// commands it runs, so compilers, linkers, and build scripts write their
+    /// scratch files there as well. The shell that ran mbx is unaffected. Has
+    /// no effect while `temp_dir` is unset.
+    #[usage(env = "MBX_EXPORT_TEMP_DIR", default = false)]
+    export_temp_dir: bool,
     /// Write a JSON build report to this path.
     #[usage(env = "MBX_STATS_REPORT")]
     stats_report: Option<PathBuf>,
@@ -683,6 +703,11 @@ pub struct Config {
     pub cache_dir: PathBuf,
     /// Persistent executable wrappers, separate from shared build artifacts.
     pub shims_dir: PathBuf,
+    /// Where mbx creates its own temporary files; the platform's temporary
+    /// directory when unset. Always absolute.
+    pub temp_dir: Option<PathBuf>,
+    /// Give the commands mbx runs `temp_dir` as their temporary directory too.
+    pub export_temp_dir: bool,
     pub stats_report: Option<PathBuf>,
     pub verify: bool,
     pub verify_sample_rate: u8,
@@ -803,6 +828,8 @@ impl Config {
         Self {
             cache_dir: cache_dir.to_path_buf(),
             shims_dir: cache_dir.join("shims"),
+            temp_dir: None,
+            export_temp_dir: false,
             stats_report: None,
             verify: false,
             verify_sample_rate: 0,
@@ -1258,6 +1285,15 @@ impl Config {
             }
             None => cache_dir.join("shims"),
         };
+        // Relative paths are refused rather than resolved: the compiler shims
+        // run from each crate's directory, so one path would name many places.
+        let temp_dir = match raw.temp_dir {
+            Some(directory) if !directory.is_absolute() => {
+                return Err(eyre::eyre!("must be an absolute path, not {directory:?}")
+                    .wrap_err(Invalid("temp_dir")));
+            }
+            directory => directory,
+        };
         let target_root = match raw.target.root {
             Some(root) if root.is_absolute() => root,
             Some(root) => cache_dir.join(root),
@@ -1402,6 +1438,8 @@ impl Config {
         let config = Self {
             cache_dir,
             shims_dir,
+            temp_dir,
+            export_temp_dir: raw.export_temp_dir,
             gc,
             target,
             scheduler,
@@ -1629,7 +1667,40 @@ impl Config {
     pub fn store_dir(&self) -> PathBuf {
         self.cache_dir.join("actions")
     }
+
+    /// The directory to create mbx's temporary files in, created if needed.
+    pub fn temp_root(&self) -> Result<PathBuf> {
+        crate::util::temp_root(self.temp_dir.as_deref())
+    }
+
+    /// Hand `temp_dir` to a command mbx runs.
+    ///
+    /// `MBX_TEMP_DIR` always travels, so the compiler shims and any nested mbx
+    /// agree with this process even when the setting came from the
+    /// configuration file. The platform's own variables follow only with
+    /// `export_temp_dir`.
+    pub(crate) fn export_temp_environment(&self, environment: &mut BTreeMap<String, String>) {
+        let Some(directory) = &self.temp_dir else {
+            return;
+        };
+        let directory = directory.display().to_string();
+        if self.export_temp_dir {
+            for name in PLATFORM_TEMP_ENV {
+                environment.insert((*name).into(), directory.clone());
+            }
+        }
+        environment.insert(TEMP_DIR_ENV.into(), directory);
+    }
 }
+
+/// The environment variable that overrides `temp_dir`.
+pub(crate) const TEMP_DIR_ENV: &str = "MBX_TEMP_DIR";
+
+/// The variables the platform's temporary directory is read from.
+#[cfg(windows)]
+const PLATFORM_TEMP_ENV: &[&str] = &["TMP", "TEMP"];
+#[cfg(not(windows))]
+const PLATFORM_TEMP_ENV: &[&str] = &["TMPDIR"];
 
 fn workspace_bool(path: &Path, setting: &str, value: &toml_edit::Item) -> Result<bool> {
     value
@@ -2137,6 +2208,103 @@ mod tests {
     fn relative_shims_normalize_parent_components_within_the_cache_root() {
         let config = configured(None, &[("MBX_SHIMS_DIR", "worker/../private/./shims")]).unwrap();
         assert_eq!(config.shims_dir, config.cache_dir.join("private/shims"));
+    }
+
+    #[test]
+    fn temporary_files_use_the_platform_directory_by_default() {
+        let config = configured(None, &[]).unwrap();
+        assert_eq!(config.temp_dir, None);
+        assert!(!config.export_temp_dir);
+        assert_eq!(config.temp_root().unwrap(), std::env::temp_dir());
+        let mut environment = BTreeMap::new();
+        config.export_temp_environment(&mut environment);
+        assert!(environment.is_empty(), "{environment:?}");
+    }
+
+    #[test]
+    fn the_temp_dir_comes_from_the_file_and_the_environment_overrides_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let from_file = directory.path().join("file");
+        let from_environment = directory.path().join("environment");
+        let file = format!("temp_dir = '{}'", from_file.display());
+        let config = configured(Some(&file), &[]).unwrap();
+        assert_eq!(config.temp_dir.as_deref(), Some(from_file.as_path()));
+        let config = configured(
+            Some(&file),
+            &[("MBX_TEMP_DIR", from_environment.to_str().unwrap())],
+        )
+        .unwrap();
+        assert_eq!(config.temp_dir.as_deref(), Some(from_environment.as_path()));
+    }
+
+    #[test]
+    fn a_relative_temp_dir_is_rejected() {
+        for path in ["scratch", "./scratch", ""] {
+            let error = configured(None, &[("MBX_TEMP_DIR", path)]).unwrap_err();
+            assert!(error.to_string().contains("invalid temp_dir"), "{error}");
+            let file = format!("temp_dir = '{path}'");
+            assert!(configured(Some(&file), &[]).is_err());
+        }
+    }
+
+    #[test]
+    fn the_temp_dir_is_created_when_first_needed() {
+        let directory = tempfile::tempdir().unwrap();
+        let temp = directory.path().join("dev drive").join("mbx");
+        let config = configured(None, &[("MBX_TEMP_DIR", temp.to_str().unwrap())]).unwrap();
+        assert!(!temp.exists(), "loading configuration must not create it");
+        assert_eq!(config.temp_root().unwrap(), temp);
+        assert!(temp.is_dir());
+    }
+
+    #[test]
+    fn an_unusable_temp_dir_names_the_setting() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("file");
+        std::fs::write(&file, b"not a directory").unwrap();
+        let blocked = file.join("mbx");
+        let config = configured(None, &[("MBX_TEMP_DIR", blocked.to_str().unwrap())]).unwrap();
+        let error = config.temp_root().unwrap_err();
+        assert!(
+            format!("{error}").contains("could not create temp_dir"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn commands_receive_the_temp_dir_and_the_platform_variables_only_when_exported() {
+        let directory = tempfile::tempdir().unwrap();
+        let temp = directory.path().join("temp");
+        let temp_text = temp.to_str().unwrap();
+        let config = configured(None, &[("MBX_TEMP_DIR", temp_text)]).unwrap();
+        let mut environment = BTreeMap::new();
+        config.export_temp_environment(&mut environment);
+        assert_eq!(
+            environment,
+            BTreeMap::from([(TEMP_DIR_ENV.to_string(), temp_text.to_string())])
+        );
+
+        let config = configured(
+            None,
+            &[("MBX_TEMP_DIR", temp_text), ("MBX_EXPORT_TEMP_DIR", "true")],
+        )
+        .unwrap();
+        assert!(config.export_temp_dir);
+        let mut environment = BTreeMap::new();
+        config.export_temp_environment(&mut environment);
+        let expected = std::iter::once(TEMP_DIR_ENV)
+            .chain(PLATFORM_TEMP_ENV.iter().copied())
+            .map(|name| (name.to_string(), temp_text.to_string()))
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(environment, expected);
+    }
+
+    #[test]
+    fn exporting_without_a_temp_dir_changes_nothing() {
+        let config = configured(None, &[("MBX_EXPORT_TEMP_DIR", "true")]).unwrap();
+        let mut environment = BTreeMap::new();
+        config.export_temp_environment(&mut environment);
+        assert!(environment.is_empty(), "{environment:?}");
     }
 
     #[test]

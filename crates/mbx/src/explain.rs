@@ -10,7 +10,9 @@ use std::process::ExitCode;
 
 /// Run Cargo with a private bypass trace and explain its contents afterwards.
 pub fn run(config: &Config, arguments: &[String]) -> Result<ExitCode> {
-    let directory = tempfile::Builder::new().prefix("mbx-explain-").tempdir()?;
+    let directory = tempfile::Builder::new()
+        .prefix("mbx-explain-")
+        .tempdir_in(config.temp_root()?)?;
     let log = directory.path().join("bypasses.tsv");
     let status = crate::cli::cargo_with_bypass_log(config, arguments, Some(&log))?;
     finish(&log, status)
@@ -21,7 +23,9 @@ pub(crate) fn run_with_settings(
     settings: &CliSettings,
     arguments: &[String],
 ) -> Result<ExitCode> {
-    let directory = tempfile::Builder::new().prefix("mbx-explain-").tempdir()?;
+    let directory = tempfile::Builder::new()
+        .prefix("mbx-explain-")
+        .tempdir_in(config.temp_root()?)?;
     let log = directory.path().join("bypasses.tsv");
     let status =
         crate::cli::cargo_with_settings_and_bypass_log(config, settings, arguments, Some(&log))?;

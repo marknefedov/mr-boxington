@@ -458,6 +458,8 @@ pub(super) fn managed_target_config(root: &Path) -> Config {
     Config {
         cache_dir: root.join("cache"),
         shims_dir: root.join("cache").join("shims"),
+        temp_dir: None,
+        export_temp_dir: false,
         stats_report: None,
         ar_determinism: "auto".into(),
         verify: false,

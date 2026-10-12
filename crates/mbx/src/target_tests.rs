@@ -5,6 +5,8 @@ fn test_config(root: &Path, views: bool) -> Config {
     Config {
         cache_dir: root.join("cache"),
         shims_dir: root.join("cache").join("shims"),
+        temp_dir: None,
+        export_temp_dir: false,
         stats_report: None,
         ar_determinism: "auto".into(),
         verify: false,

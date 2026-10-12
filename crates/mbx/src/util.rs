@@ -121,6 +121,21 @@ fn is_delta_worktree_root(directory: &Path) -> bool {
             .is_some_and(|parent| parent.file_name() == Some(std::ffi::OsStr::new(".delta")))
 }
 
+/// The directory for mbx's temporary files: the configured `temp_dir`,
+/// created if it does not exist yet, or else the platform's.
+pub fn temp_root(configured: Option<&Path>) -> Result<PathBuf> {
+    let Some(directory) = configured else {
+        return Ok(std::env::temp_dir());
+    };
+    std::fs::create_dir_all(directory).wrap_err_with(|| {
+        format!(
+            "could not create temp_dir {}; point MBX_TEMP_DIR or `mbx settings set temp_dir <path>` at a writable directory",
+            directory.display()
+        )
+    })?;
+    Ok(directory.to_path_buf())
+}
+
 /// Write `contents` to `path` so readers never observe a partial file.
 pub fn write_atomic(path: &Path, contents: &[u8]) -> Result<()> {
     let parent = path

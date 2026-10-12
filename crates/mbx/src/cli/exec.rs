@@ -45,7 +45,9 @@ pub(super) fn run(config: &Config, settings: &CliSettings, args: &ExecArgs) -> R
     }
 
     crate::storage::check_cache(config)?;
-    let session_dir = tempfile::Builder::new().prefix("mbx-session-").tempdir()?;
+    let session_dir = tempfile::Builder::new()
+        .prefix("mbx-session-")
+        .tempdir_in(config.temp_root()?)?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
@@ -70,6 +72,7 @@ pub(super) fn run(config: &Config, settings: &CliSettings, args: &ExecArgs) -> R
         )
         .await?;
         let mut environment = inherited_environment(|name| std::env::var(name).ok(), &working_dir);
+        config.export_temp_environment(&mut environment);
         let run = session
             .begin_exec(
                 &project_root,

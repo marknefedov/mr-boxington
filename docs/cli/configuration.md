@@ -132,6 +132,16 @@ Cap on the per-compilation history one build records, or `"none"`.
 
 Past the cap, the totals the build reports stay complete but its per-compilation rows stop, and `mbx explain` says so.
 
+### `export_temp_dir`
+
+- **Type:** `bool`
+- **Default:** `false`
+- **Set with:** `MBX_EXPORT_TEMP_DIR`
+
+Point the temporary directory of Cargo and the tools it runs at `temp_dir`.
+
+mbx then sets `TMPDIR` on Unix, or `TMP` and `TEMP` on Windows, for the commands it runs, so compilers, linkers, and build scripts write their scratch files there as well. The shell that ran mbx is unaffected. Has no effect while `temp_dir` is unset.
+
 ### `forward_compiler_notifications`
 
 - **Type:** `bool`
@@ -689,6 +699,17 @@ Copy registry build units from another checkout's managed target into a profile 
 - **Set with:** `MBX_TARGET_VIEWS`
 
 Let mbx place eligible target directories under the managed target root.
+
+### `temp_dir`
+
+- **Type:** `option<path>`
+- **Optional:** true
+- **Default:** the platform temporary directory, from `TMPDIR` on Unix or `TMP` and `TEMP` on Windows
+- **Set with:** `MBX_TEMP_DIR`
+
+Directory for mbx's own temporary files, such as each build's session directory.
+
+Must be an absolute path, and is created when first needed. Point it at the volume that holds `cache_dir`, such as a Windows Dev Drive, to keep a build's scratch files there too. Only mbx uses it unless `export_temp_dir` is enabled. On Unix, a long path can exceed the length limit for the session's socket.
 
 ### `verify`
 

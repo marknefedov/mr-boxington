@@ -372,7 +372,9 @@ fn cargo_with_settings_bypass_log_and_roots(
         mark_explained(&config.store_dir());
     }
 
-    let session_dir = tempfile::Builder::new().prefix("mbx-session-").tempdir()?;
+    let session_dir = tempfile::Builder::new()
+        .prefix("mbx-session-")
+        .tempdir_in(config.temp_root()?)?;
     let launch = super::launch::Launch::prepare(arguments, session_dir.path())?;
     let test_runner = super::test_runner::TestRunner::prepare(
         config,
@@ -415,6 +417,7 @@ fn cargo_with_settings_bypass_log_and_roots(
                 if settings.plain_output {
                     environment.insert("CARGO_TERM_PROGRESS_WHEN".into(), "never".into());
                 }
+                config.export_temp_environment(&mut environment);
                 // The lane still applies: without the session Cargo would
                 // otherwise go back to the target a build may be holding.
                 let fallback = lane_arguments.as_deref().unwrap_or(arguments);
@@ -423,6 +426,7 @@ fn cargo_with_settings_bypass_log_and_roots(
             Err(error) => return Err(error),
         };
         let mut environment = inherited_environment(|name| std::env::var(name).ok(), &working_dir);
+        config.export_temp_environment(&mut environment);
         let _lease = super::launch::lease(session_dir.path(), &mut environment)?;
         if let Some(path) = bypass_log {
             let path = if path.is_absolute() {

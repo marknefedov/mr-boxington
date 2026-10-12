@@ -130,7 +130,7 @@ pub(crate) fn document(rustdoc: &OsStr, arguments: &[OsString]) -> Result<ExitCo
         return Ok(ExitCode::SUCCESS);
     }
 
-    let generated = tempfile::tempdir()?;
+    let generated = tempfile::tempdir_in(temp_root()?)?;
     let doc = generated.path().join("doc");
     let parts = generated.path().join("parts");
     std::fs::create_dir_all(&doc)?;
@@ -512,6 +512,15 @@ fn restore(action: &CacheDigest, action_bytes: &[u8]) -> Result<Option<CachedDoc
     }))
 }
 
+/// The session's `temp_dir`, which mbx passes to every compiler shim it
+/// starts, or the platform's temporary directory outside a configured session.
+fn temp_root() -> Result<PathBuf> {
+    let configured = std::env::var_os(crate::config::TEMP_DIR_ENV)
+        .filter(|directory| !directory.is_empty())
+        .map(PathBuf::from);
+    crate::util::temp_root(configured.as_deref())
+}
+
 fn publish(
     action: &CacheDigest,
     action_bytes: &[u8],
@@ -519,7 +528,7 @@ fn publish(
     stdout: &[u8],
     stderr: &[u8],
 ) -> Result<()> {
-    let staging = tempfile::tempdir()?;
+    let staging = tempfile::tempdir_in(temp_root()?)?;
     let stage = |name: &str, bytes: &[u8]| -> Result<(CacheDigest, PathBuf)> {
         let path = staging.path().join(name);
         std::fs::write(&path, bytes)?;

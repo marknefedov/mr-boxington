@@ -162,7 +162,7 @@ async fn check(config: &Config, toolchain: Option<&str>) -> Vec<Check> {
     ];
     checks.push(cache_check(&config.cache_dir));
     #[cfg(unix)]
-    checks.push(session_check());
+    checks.push(session_check(config));
     checks.push(Check::pass(
         "config",
         format!(
@@ -188,21 +188,22 @@ async fn check(config: &Config, toolchain: Option<&str>) -> Vec<Check> {
 
 /// Probe the transport every orchestrated build needs in this environment.
 ///
-/// This uses a fresh temporary directory just like a real session. Sandboxes
+/// This uses a fresh directory under `temp_dir` just like a real session. Sandboxes
 /// can permit both creating the directory and opening an AF_UNIX socket while
 /// still rejecting `bind`, so no filesystem-only check can answer this.
 #[cfg(unix)]
-fn session_check() -> Check {
-    let directory = match tempfile::Builder::new()
-        .prefix("mbx-session-probe-")
-        .tempdir()
-    {
+fn session_check(config: &Config) -> Check {
+    let directory = match config.temp_root().and_then(|root| {
+        Ok(tempfile::Builder::new()
+            .prefix("mbx-session-probe-")
+            .tempdir_in(root)?)
+    }) {
         Ok(directory) => directory,
         Err(error) => {
             return Check::warn(
                 "session",
                 format!(
-                    "listener was not tested because a temporary directory could not be created: {error}"
+                    "listener was not tested because a temporary directory could not be created: {error:#}"
                 ),
             );
         }
@@ -699,7 +700,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_build_session_transport_is_probed() {
-        let check = session_check();
+        let cache = tempfile::tempdir().unwrap();
+        let check = session_check(&Config::for_test(cache.path()));
         assert_eq!(check.name, "session");
         match check.severity {
             Severity::Pass => assert!(check.detail.contains("Unix-domain")),
@@ -890,6 +892,8 @@ mod tests {
         let mut config = Config {
             cache_dir: directory.path().to_path_buf(),
             shims_dir: directory.path().join("shims"),
+            temp_dir: None,
+            export_temp_dir: false,
             stats_report: None,
             ar_determinism: "auto".into(),
             verify: false,
@@ -939,6 +943,8 @@ mod tests {
         let mut config = Config {
             cache_dir: directory.path().to_path_buf(),
             shims_dir: directory.path().join("shims"),
+            temp_dir: None,
+            export_temp_dir: false,
             stats_report: None,
             ar_determinism: "auto".into(),
             verify: false,
