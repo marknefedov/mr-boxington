@@ -433,7 +433,11 @@ fn reflink_check_with(
 /// warning when the configured policy leaves this build unnormalized.
 fn archive_check(config: &Config) -> Check {
     let mode = crate::ar::ArDeterminism::parse(&config.ar_determinism);
-    match crate::ar::probe() {
+    let probe = match config.temp_root() {
+        Ok(directory) => crate::ar::probe(&directory),
+        Err(error) => crate::ar::Probe::Unavailable(format!("{error:#}")),
+    };
+    match probe {
         crate::ar::Probe::Deterministic => Check::pass(
             "archives",
             "the archive tools already produce identical bytes for identical input",

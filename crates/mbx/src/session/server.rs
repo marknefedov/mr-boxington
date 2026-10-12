@@ -76,10 +76,14 @@ impl std::error::Error for ListenerBindError {
 
 #[cfg(unix)]
 impl ListenerBindError {
+    /// `InvalidInput` is a socket path too long for `sun_path`, as under a
+    /// deeply nested `temp_dir`. A FIFO's path has no such limit.
     fn unavailable(&self) -> bool {
         matches!(
             self.source.kind(),
-            std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::Unsupported
+            std::io::ErrorKind::PermissionDenied
+                | std::io::ErrorKind::Unsupported
+                | std::io::ErrorKind::InvalidInput
         )
     }
 }
@@ -425,10 +429,11 @@ mod tests {
     use mbx_cache_core::{AgentRequest, AgentResponse};
 
     #[test]
-    fn permission_and_platform_rejections_mean_the_listener_is_unavailable() {
+    fn permission_platform_and_path_length_rejections_mean_the_listener_is_unavailable() {
         for kind in [
             std::io::ErrorKind::PermissionDenied,
             std::io::ErrorKind::Unsupported,
+            std::io::ErrorKind::InvalidInput,
         ] {
             let error = eyre::Report::from(ListenerBindError {
                 path: "/tmp/cache-agent.sock".into(),

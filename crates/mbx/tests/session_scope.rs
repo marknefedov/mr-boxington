@@ -248,6 +248,8 @@ fn main() {
     let expected: Vec<_> = std::env::split_paths(&std::env::var_os("EXPECTED_PATH").unwrap()).collect();
     assert!(path.ends_with(&expected));
     assert!(!std::env::var("CARGO").unwrap().is_empty());
+    // The build's exported temporary directory stays with the build.
+    assert_ne!(std::env::temp_dir(), std::path::PathBuf::from(std::env::var_os("MBX_TEMP_DIR").unwrap()));
     assert_eq!(std::env::args().nth(1).unwrap(), "argument with spaces");
     println!("application started");
     std::process::exit(23);
@@ -259,6 +261,8 @@ fn main() {
         .env("MBX_VERIFY", "0")
         .env("EXPECTED_PATH", std::env::var_os("PATH").unwrap())
         .env("MBX_CARGO_SHIM_MODE", "1")
+        .env("MBX_TEMP_DIR", root.path().join("t"))
+        .env("MBX_EXPORT_TEMP_DIR", "1")
         .env("RUSTFLAGS", "-C prefer-dynamic")
         .args([
             "--color",
@@ -883,7 +887,14 @@ fn the_session_lives_in_the_configured_temp_dir_and_commands_get_it_only_when_ex
         } else {
             assert_ne!(script_temp, temp);
         }
-        // The session cleaned up after itself; the directory it was created in stays.
-        assert_eq!(std::fs::read_dir(&temp).unwrap().count(), 0);
+        // The session cleaned up after itself. Only its own entries are
+        // checked: with the directory exported, the toolchain may leave
+        // caches there, such as xcrun's on macOS.
+        let leftovers = std::fs::read_dir(&temp)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .filter(|name| name.to_string_lossy().starts_with("mbx-"))
+            .collect::<Vec<_>>();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
     }
 }

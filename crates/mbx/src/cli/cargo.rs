@@ -417,7 +417,6 @@ fn cargo_with_settings_bypass_log_and_roots(
                 if settings.plain_output {
                     environment.insert("CARGO_TERM_PROGRESS_WHEN".into(), "never".into());
                 }
-                config.export_temp_environment(&mut environment);
                 // The lane still applies: without the session Cargo would
                 // otherwise go back to the target a build may be holding.
                 let fallback = lane_arguments.as_deref().unwrap_or(arguments);

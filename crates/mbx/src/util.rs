@@ -129,7 +129,7 @@ pub fn temp_root(configured: Option<&Path>) -> Result<PathBuf> {
     };
     std::fs::create_dir_all(directory).wrap_err_with(|| {
         format!(
-            "could not create temp_dir {}; point MBX_TEMP_DIR or `mbx settings set temp_dir <path>` at a writable directory",
+            "failed to create temp_dir {}; set MBX_TEMP_DIR or `mbx settings set temp_dir <path>` to a writable directory",
             directory.display()
         )
     })?;

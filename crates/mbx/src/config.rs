@@ -146,20 +146,24 @@ pub(crate) struct RawConfig {
     ///
     /// Must be an absolute path, and is created when first needed. Point it at
     /// the volume that holds `cache_dir`, such as a Windows Dev Drive, to keep
-    /// a build's scratch files there too. Only mbx uses it unless
-    /// `export_temp_dir` is enabled. On Unix, a long path can exceed the
-    /// length limit for the session's socket.
+    /// a build's scratch files there too. Other programs keep their own
+    /// temporary directory unless `export_temp_dir` is enabled. mbx removes
+    /// each session directory when its command ends, but one left by a killed
+    /// build stays until you delete it. On Unix, keep the path under about 65
+    /// bytes: a longer one makes the session's socket path too long, and
+    /// builds warn and fall back to the FIFO transport.
     #[usage(
         env = "MBX_TEMP_DIR",
-        default_note = "the platform temporary directory, from `TMPDIR` on Unix or `TMP` and `TEMP` on Windows"
+        default_note = "the platform temporary directory: `TMPDIR` or `/tmp` on Unix; `TMP`, `TEMP`, or the user profile on Windows"
     )]
     temp_dir: Option<PathBuf>,
     /// Point the temporary directory of Cargo and the tools it runs at `temp_dir`.
     ///
     /// mbx then sets `TMPDIR` on Unix, or `TMP` and `TEMP` on Windows, for the
-    /// commands it runs, so compilers, linkers, and build scripts write their
-    /// scratch files there as well. The shell that ran mbx is unaffected. Has
-    /// no effect while `temp_dir` is unset.
+    /// commands it runs, so compilers, linkers, build scripts, and test
+    /// binaries write their scratch files there as well. The shell that ran
+    /// mbx and an application started by `cargo run` keep their own. Has no
+    /// effect while `temp_dir` is unset.
     #[usage(env = "MBX_EXPORT_TEMP_DIR", default = false)]
     export_temp_dir: bool,
     /// Write a JSON build report to this path.
@@ -1289,8 +1293,10 @@ impl Config {
         // run from each crate's directory, so one path would name many places.
         let temp_dir = match raw.temp_dir {
             Some(directory) if !directory.is_absolute() => {
-                return Err(eyre::eyre!("must be an absolute path, not {directory:?}")
-                    .wrap_err(Invalid("temp_dir")));
+                return Err(
+                    eyre::eyre!("must be an absolute path, not '{}'", directory.display())
+                        .wrap_err(Invalid("temp_dir")),
+                );
             }
             directory => directory,
         };
@@ -2266,7 +2272,7 @@ mod tests {
         let config = configured(None, &[("MBX_TEMP_DIR", blocked.to_str().unwrap())]).unwrap();
         let error = config.temp_root().unwrap_err();
         assert!(
-            format!("{error}").contains("could not create temp_dir"),
+            format!("{error}").contains("failed to create temp_dir"),
             "{error}"
         );
     }

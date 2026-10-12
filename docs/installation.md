@@ -234,8 +234,8 @@ On Windows, mbx differs from Linux and macOS in these ways:
   those files on the Dev Drive too, set [`temp_dir`](/configuration#temp-dir),
   such as `mbx settings set temp_dir 'A:\Dev\temp\mbx'`. Enable
   [`export_temp_dir`](/configuration#export-temp-dir) to also point `TEMP` and
-  `TMP` there for Cargo, rustc, linkers, and build scripts, without setting
-  them for the rest of your shell.
+  `TMP` there for Cargo, rustc, linkers, build scripts, and tests, without
+  setting them for the rest of your shell.
 - A managed target directory needs a `target` symlink, which Windows creates
   only in Developer Mode or for a privileged process. If Windows refuses, mbx
   lets Cargo use its ordinary target directory. See

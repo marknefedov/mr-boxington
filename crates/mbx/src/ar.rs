@@ -151,18 +151,20 @@ pub(crate) enum Probe {
     Unavailable(String),
 }
 
-pub(crate) fn probe() -> Probe {
-    match probe_inner() {
+pub(crate) fn probe(directory: &std::path::Path) -> Probe {
+    match probe_inner(directory) {
         Ok(true) => Probe::Stamps,
         Ok(false) => Probe::Deterministic,
         Err(error) => Probe::Unavailable(error.to_string()),
     }
 }
 
-fn probe_inner() -> std::io::Result<bool> {
+fn probe_inner(directory: &std::path::Path) -> std::io::Result<bool> {
     use std::process::{Command, Stdio};
 
-    let directory = tempfile::Builder::new().prefix("mbx-ar-probe-").tempdir()?;
+    let directory = tempfile::Builder::new()
+        .prefix("mbx-ar-probe-")
+        .tempdir_in(directory)?;
     let member = directory.path().join("member");
     // Any file serves. `ranlib` warns that it is not an object and still
     // rewrites the header this probe is reading, so the archive stays valid

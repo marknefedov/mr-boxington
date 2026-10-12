@@ -513,8 +513,13 @@ pub(super) fn install_session_shims(
     );
     let rustc = binary_shims.join(shim_file_name(RUSTC_SHIM_STEM));
     link_path_shim(&executable, &rustc)?;
+    // Windows shims are hard links, which cannot cross volumes. The rustc shim
+    // is the same binary and lives with the cache, usually on the volume that
+    // also holds `temp_dir`, so linking to it spares each session a copy of
+    // mbx when mbx itself is installed elsewhere.
+    let rustdoc_source = if cfg!(windows) { &rustc } else { &executable };
     let rustdoc = install_shim_named(
-        &executable,
+        rustdoc_source,
         session_dir,
         RUSTDOC_SHIM_STEM,
         ShimLink::Tracking,
